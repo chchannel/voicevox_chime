@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# PyInstaller
+build/
+dist/
+!dist/voicevox_chime.exe
+*.spec
+
+# Node/Electron (If any remain)
+node_modules/
+package-lock.json
+
+# App Config
+config.json
+
+# OS files
+.DS_Store
+Thumbs.db
