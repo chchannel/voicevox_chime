@@ -23,7 +23,7 @@
 
 ## 使い方
 ### EXEから起動する場合
-1. `dist/voicevox_chime.exe` を実行します。
+[release](https://github.com/chchannel/voicevox_chime/releases)から最新版のvoicevox_chime.exeをダウンロードし実行します。
 
 ### Pythonソースから起動する場合
 以下のコマンドを実行します（要: tkinter, pygame, Pillow, pystray）。
