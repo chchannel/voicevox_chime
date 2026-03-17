@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, simpledialog
 import pygame
 import time
 import threading
@@ -50,9 +50,10 @@ def load_config():
         "always_on_top": False,
         "prevent_multiple": True,
         "volume": 0.5,
-        "geometry": "260x400+100+100",
+        "geometry": "260x450+100+100",
         "character": "zundamon",
-        "minimize_to_tray": True
+        "minimize_to_tray": True,
+        "deadline": ""  # 例: "2026-03-31 23:59:59"
     }
 
 def save_config(config):
@@ -79,7 +80,7 @@ class ChimeApp:
         self.root.title("voicevox_chime")
         
         # ジオメトリの復元
-        geom = config.get("geometry", "260x400+100+100")
+        geom = config.get("geometry", "260x450+100+100")
         self.root.geometry(geom)
         self.root.resizable(True, True)
         
@@ -101,6 +102,7 @@ class ChimeApp:
         self.volume = tk.DoubleVar(value=config.get("volume", 0.5))
         self.character = tk.StringVar(value=config.get("character", "zundamon"))
         self.minimize_to_tray = tk.BooleanVar(value=config.get("minimize_to_tray", True))
+        self.deadline_str = tk.StringVar(value=config.get("deadline", ""))
         
         self.last_played_minute = -1
         self.last_countdown_sec = -1
@@ -123,7 +125,7 @@ class ChimeApp:
         vars_to_trace = [self.mode, self.interval, self.specific_minute, 
                          self.date_format, self.always_on_top, 
                          self.prevent_multiple, self.volume, self.character,
-                         self.minimize_to_tray]
+                         self.minimize_to_tray, self.deadline_str]
         for v in vars_to_trace:
             v.trace_add("write", lambda *args: self.trigger_save())
 
@@ -142,9 +144,19 @@ class ChimeApp:
 
         # 時刻表示
         self.time_label = ttk.Label(self.main_frame, text="00:00:00", font=("Helvetica", 28, "bold"))
-        self.time_label.pack(pady=(0, 2), expand=True)
+        self.time_label.pack(pady=(0, 2))
 
-        # キャラクター選択
+        # --- カウントダウン表示 ---
+        self.countdown_frame = ttk.Frame(self.main_frame)
+        self.countdown_frame.pack(fill=tk.X, pady=2)
+        self.countdown_label = ttk.Label(self.countdown_frame, text="〆切設定なし", font=("Helvetica", 10), foreground="gray")
+        self.countdown_label.pack(expand=True)
+        # クリックで設定ダイアログ
+        self.countdown_label.bind("<Button-1>", self.set_deadline)
+        # ツールチップ的なヒント
+        # self.countdown_label.bind("<Enter>", lambda e: self.status_label.config(text="クリックして〆切を設定"))
+
+        # --- キャラクター選択 ---
         char_frame = ttk.Frame(self.main_frame)
         char_frame.pack(fill=tk.X, pady=2)
         ttk.Label(char_frame, text="声:", font=("Helvetica", 9)).pack(side=tk.LEFT, padx=5)
@@ -153,20 +165,18 @@ class ChimeApp:
         self.char_combobox.set(CHARACTERS.get(self.character.get(), "ずんだもん"))
         self.char_combobox.bind("<<ComboboxSelected>>", self.on_char_change)
 
-        # 音量スライダー
+        # --- 音量スライダー ---
         vol_frame = ttk.Frame(self.main_frame)
         vol_frame.pack(fill=tk.X, pady=2)
         ttk.Label(vol_frame, text="音量:", font=("Helvetica", 9)).pack(side=tk.LEFT, padx=5)
         self.vol_scale = ttk.Scale(vol_frame, from_=0.0, to=1.0, variable=self.volume, orient=tk.HORIZONTAL)
         self.vol_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
 
-        # モード選択
+        # --- モード選択 ---
         mode_frame = ttk.LabelFrame(self.main_frame, text="通知設定", padding="2")
         mode_frame.pack(fill=tk.X, pady=2)
-        
         ttk.Radiobutton(mode_frame, text="間隔", variable=self.mode, value="interval", command=self.update_ui).pack(side=tk.LEFT, padx=5)
         ttk.Radiobutton(mode_frame, text="指定", variable=self.mode, value="specific", command=self.update_ui).pack(side=tk.LEFT, padx=5)
-
         self.settings_frame = ttk.Frame(mode_frame)
         self.settings_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.update_ui()
@@ -174,7 +184,6 @@ class ChimeApp:
         # オプションエリア
         opt_frame = ttk.LabelFrame(self.main_frame, text="オプション", padding="2")
         opt_frame.pack(fill=tk.X, pady=5)
-        
         ttk.Checkbutton(opt_frame, text="最前面", variable=self.always_on_top, command=self.toggle_on_top).grid(row=0, column=0, sticky=tk.W, padx=5)
         ttk.Checkbutton(opt_frame, text="重複防止", variable=self.prevent_multiple).grid(row=0, column=1, sticky=tk.W, padx=5)
         ttk.Checkbutton(opt_frame, text="最小化でトレイ格納", variable=self.minimize_to_tray).grid(row=1, column=0, columnspan=2, sticky=tk.W, padx=5)
@@ -183,19 +192,28 @@ class ChimeApp:
         self.status_label = ttk.Label(self.main_frame, text="稼働中", foreground="green", font=("Helvetica", 9))
         self.status_label.pack(pady=2)
 
+    def set_deadline(self, event=None):
+        current = self.deadline_str.get() or datetime.now().strftime("%Y-%m-%d %H:%M")
+        new_val = simpledialog.askstring("〆切設定", "〆切日時を入力してください\n形式: YYYY-MM-DD HH:MM", initialvalue=current)
+        if new_val is not None:
+            try:
+                # 形式チェック
+                datetime.strptime(new_val, "%Y-%m-%d %H:%M")
+                self.deadline_str.set(new_val)
+            except ValueError:
+                messagebox.showerror("エラー", "日時の形式が正しくありません。\n例: 2026-03-31 23:59")
+
     def setup_tray(self):
-        # トレイ用アイコンの画像作成
         if os.path.exists(self.icon_path):
             image = Image.open(self.icon_path)
         else:
             image = Image.new('RGB', (64, 64), color=(255, 255, 255))
-
         menu = pystray.Menu(
             item('アプリを開く', self.show_window, default=True),
             item('READMEを表示', self.open_readme),
             item('終了', self.quit_app)
         )
-        self.tray_icon = pystray.Icon("ChimeApp", image, "時報アプリ", menu)
+        self.tray_icon = pystray.Icon("ChimeApp", image, "voicevox_chime", menu)
         threading.Thread(target=self.tray_icon.run, daemon=True).start()
 
     def show_window(self, icon=None, item=None):
@@ -227,7 +245,6 @@ class ChimeApp:
     def update_ui(self):
         for widget in self.settings_frame.winfo_children():
             widget.destroy()
-
         if self.mode.get() == "interval":
             combo = ttk.Combobox(self.settings_frame, values=[1,2,3,5,10,15,20,30,60], textvariable=self.interval, width=3)
             combo.pack(side=tk.LEFT, padx=2)
@@ -256,6 +273,7 @@ class ChimeApp:
             "volume": self.volume.get(),
             "character": self.character.get(),
             "minimize_to_tray": self.minimize_to_tray.get(),
+            "deadline": self.deadline_str.get(),
             "geometry": self.root.geometry()
         }
         save_config(new_config)
@@ -276,15 +294,38 @@ class ChimeApp:
         self.date_label.config(text=date_str)
         self.time_label.config(text=now.strftime("%H:%M:%S"))
         
+        # カウントダウン更新
+        self.update_deadline_label(now)
+        
         self.check_countdown(now)
         self.check_chime(now)
         self.root.after(100, self.update_clock)
+
+    def update_deadline_label(self, now):
+        d_str = self.deadline_str.get()
+        if not d_str:
+            self.countdown_label.config(text="〆切未設定 (クリックで設定)", foreground="gray")
+            return
+        
+        try:
+            deadline = datetime.strptime(d_str, "%Y-%m-%d %H:%M")
+            diff = deadline - now
+            total_seconds = int(diff.total_seconds())
+            if total_seconds > 0:
+                hours = total_seconds // 3600
+                minutes = (total_seconds % 3600) // 60
+                seconds = total_seconds % 60
+                text = f"〆切まで {hours:02}:{minutes:02}:{seconds:02}"
+                self.countdown_label.config(text=text, foreground="red" if hours < 24 else "black")
+            else:
+                self.countdown_label.config(text="〆切を過ぎました", foreground="blue")
+        except:
+            self.countdown_label.config(text="〆切設定エラー", foreground="orange")
 
     def check_countdown(self, now):
         s = now.second
         m = now.minute
         next_m = (m + 1) % 60
-        
         will_chime = False
         if self.mode.get() == "interval":
             if next_m % self.interval.get() == 0:
@@ -295,10 +336,8 @@ class ChimeApp:
                     will_chime = True
             except:
                 pass
-        
         if not will_chime:
             return
-
         if 55 <= s <= 59:
             if self.last_countdown_sec != s:
                 self.last_countdown_sec = s
